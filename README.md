@@ -4,6 +4,8 @@
 
 原生 HTML / CSS / JavaScript，零依赖、零后端、纯离线，双击 `index.html` 就能玩。
 
+**在线试玩：** https://mervyn-he.github.io/keybubble/
+
 ![游戏画面](docs/gameplay.png)
 
 ## 玩法
@@ -79,4 +81,4 @@ docs/                   README 截图
 
 ## License
 
-暂未指定。如有需要请先联系作者。
+[MIT](LICENSE) © 2026 mervyn-he
