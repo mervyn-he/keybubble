@@ -1,0 +1,20 @@
+# 构建产物（由 tools/build-single.py 生成）
+海滩打字小勇士-单文件版.html
+
+# 设计阶段素材（成品背景已存入 assets/）
+游戏背景方案_assets/
+游戏背景方案.miora
+
+# 工作区与工具缓存
+.workbuddy/
+
+# 依赖目录（本项目不依赖，防误提交）
+node_modules/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.log

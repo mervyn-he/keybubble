@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>海滩打字小勇士 · 孩子键盘打字练习</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+  <img class="scene" src="assets/bg-beach.png" alt="" />
+  <div class="scene-veil"></div>
+
+  <header class="hud">
+    <div class="hud-group hud-score">
+      <div class="stat">
+        <span class="stat-label">得分</span>
+        <span id="score" class="stat-value">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">连击</span>
+        <span id="combo" class="stat-value combo">×0</span>
+      </div>
+    </div>
+
+    <div class="hud-group hud-level">
+      <div class="level-line">
+        <span id="levelText">第 1 关</span>
+        <span id="levelCount" class="level-count">0 / 8</span>
+      </div>
+      <div class="level-bar"><i id="levelFill"></i></div>
+    </div>
+
+    <div class="hud-group hud-right">
+      <div id="hearts" class="hearts" aria-label="剩余生命"></div>
+      <button id="soundBtn" class="icon-btn" type="button" title="声音开关" aria-label="声音开关">
+        <svg viewBox="0 0 24 24" class="ico ico-sound-on"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7" fill="none" stroke-width="2" stroke-linecap="round"/><path d="M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button id="pauseBtn" class="icon-btn" type="button" title="暂停 (Esc)" aria-label="暂停">
+        <svg viewBox="0 0 24 24" class="ico"><rect x="7" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.4" y="5" width="3.6" height="14" rx="1.2"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="field">
+    <div class="layer" id="layerBubbles"></div>
+    <div class="layer fx" id="layerFx"></div>
+    <div class="toast" id="toast"></div>
+
+    <section class="overlay" id="screenStart">
+      <div class="card card-start">
+        <p class="eyebrow">沙滩上的打字冒险</p>
+        <h1 class="game-title">海滩打字小勇士</h1>
+        <p class="game-sub">泡泡从海里飘上来，泡泡上写着字母。<br />在键盘上敲出它，泡泡就会「啵」地炸开！</p>
+
+        <div class="mode-list" id="modeList">
+          <button class="mode-card is-active" type="button" data-mode="home">
+            <span class="mode-tag">入门</span>
+            <strong>基准键</strong>
+            <em>A S D F · J K L</em>
+            <small>先把手指放对位置</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="all">
+            <span class="mode-tag">挑战</span>
+            <strong>全部字母</strong>
+            <em>A — Z</em>
+            <small>认全 26 个字母键</small>
+          </button>
+          <button class="mode-card" type="button" data-mode="word">
+            <span class="mode-tag">高手</span>
+            <strong>单词</strong>
+            <em>cat · fish · star</em>
+            <small>按顺序敲完一个词</small>
+          </button>
+        </div>
+
+        <button class="btn btn-primary" id="startBtn" type="button">开始游戏</button>
+        <p class="footnote">小提示：手指放在 <b>A S D F</b> 和 <b>J K L</b> 上，左右手指交替敲，眼睛看泡泡不看键盘。</p>
+      </div>
+    </section>
+
+    <section class="overlay hidden" id="screenPause">
+      <div class="card card-small">
+        <h2>休息一下</h2>
+        <p class="game-sub">游戏已暂停，准备好了就继续。</p>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="resumeBtn" type="button">继续游戏</button>
+          <button class="btn btn-ghost" id="restartBtn" type="button">重新开始</button>
+          <button class="btn btn-ghost" id="homeBtn" type="button">回到首页</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="overlay hidden" id="screenEnd">
+      <div class="card card-end">
+        <p class="eyebrow" id="endEyebrow">本轮结束</p>
+        <h2 class="end-title" id="endTitle">打得不错！</h2>
+
+        <div class="score-big">
+          <span id="endScore">0</span>
+          <small>分</small>
+        </div>
+        <p class="new-best hidden" id="newBest">新纪录！</p>
+
+        <div class="result-grid">
+          <div class="result-item"><span class="r-label">最高连击</span><span class="r-value" id="endCombo">0</span></div>
+          <div class="result-item"><span class="r-label">正确率</span><span class="r-value" id="endAccuracy">0%</span></div>
+          <div class="result-item"><span class="r-label">速度</span><span class="r-value" id="endCpm">0</span><span class="r-unit">字/分</span></div>
+          <div class="result-item"><span class="r-label">打爆泡泡</span><span class="r-value" id="endPops">0</span></div>
+        </div>
+
+        <p class="best-line" id="bestLine">最好成绩：0 分</p>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="againBtn" type="button">再来一局</button>
+          <button class="btn btn-ghost" id="backBtn" type="button">换个模式</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="deck">
+    <div class="deck-head">
+      <div class="next-wrap">
+        <span class="next-label">下一个键</span>
+        <span class="next-key" id="nextKey">—</span>
+        <span class="finger-tip" id="fingerTip">准备好就开始</span>
+      </div>
+      <div class="deck-legend">
+        <span class="legend-item"><i class="dot dot-left"></i>左手</span>
+        <span class="legend-item"><i class="dot dot-right"></i>右手</span>
+      </div>
+    </div>
+    <div class="keyboard" id="keyboard"></div>
+  </footer>
+
+  <div class="corner-mark">海滩打字小勇士 · 键盘指法练习</div>
+</div>
+
+<script src="js/game.js"></script>
+</body>
+</html>
