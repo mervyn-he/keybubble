@@ -207,10 +207,10 @@ html, body {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 84px;
+  height: 92px;
   z-index: 7;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(255, 249, 238, 0) 0%, rgba(255, 249, 238, 0.72) 55%, rgba(255, 249, 238, 0.95) 100%);
+  background: linear-gradient(180deg, rgba(255, 249, 238, 0) 0%, rgba(255, 249, 238, 0.42) 58%, rgba(255, 249, 238, 0.72) 100%);
 }
 
 .layer {
@@ -233,16 +233,16 @@ html, body {
 }
 
 .bubble--letter {
-  width: 100px;
-  height: 100px;
+  width: 110px;
+  height: 110px;
   border-radius: 50%;
   background:
-    radial-gradient(circle at 34% 24%, #ffffff 0%, #ffffff 16%, var(--fill1, #ddf3fc) 58%, var(--fill2, #b9e6f7) 100%);
+    radial-gradient(circle at 32% 22%, #ffffff 0%, #f0fbff 11%, #b6e6f8 50%, #7fcdea 100%);
   border: 4px solid var(--ring, #3aa6d8);
   box-shadow:
-    0 16px 28px rgba(10, 62, 82, 0.3),
-    0 2px 0 rgba(255, 255, 255, 0.95) inset,
-    inset 0 -10px 20px rgba(255, 255, 255, 0.45);
+    0 18px 30px rgba(10, 62, 82, 0.34),
+    0 0 0 3px rgba(255, 255, 255, 0.8),
+    inset 0 -12px 22px rgba(90, 180, 220, 0.55);
   animation: bubbleIn 0.35s cubic-bezier(0.2, 1.5, 0.5, 1) both;
 }
 
@@ -251,9 +251,12 @@ html, body {
   height: 78px;
   padding: 0 26px;
   border-radius: 99px;
-  background: linear-gradient(180deg, #fffdf6 0%, #ffeecd 68%, #ffdcb0 100%);
-  border: 4px solid #f0834f;
-  box-shadow: 0 16px 28px rgba(10, 62, 82, 0.3), inset 0 -8px 16px rgba(255, 206, 150, 0.6);
+  background: linear-gradient(180deg, #fffaf0 0%, #ffe4b8 62%, #ffd197 100%);
+  border: 4px solid #e07a45;
+  box-shadow:
+    0 18px 30px rgba(10, 62, 82, 0.34),
+    0 0 0 3px rgba(255, 255, 255, 0.8),
+    inset 0 -8px 16px rgba(255, 190, 120, 0.7);
   animation: bubbleIn 0.35s cubic-bezier(0.2, 1.5, 0.5, 1) both;
 }
 
@@ -263,7 +266,7 @@ html, body {
 }
 
 .bubble-char {
-  font-size: 50px;
+  font-size: 54px;
   font-weight: 800;
   color: #0f3547;
   line-height: 1;
@@ -338,7 +341,7 @@ html, body {
 /* 提示气泡文字 */
 .toast {
   position: absolute;
-  top: 12%;
+  top: 96px;
   left: 50%;
   transform: translate(-50%, -6px) scale(0.9);
   padding: 10px 26px;
@@ -366,6 +369,251 @@ html, body {
   25% { transform: translateX(-6px); }
   50% { transform: translateX(5px); }
   75% { transform: translateX(-3px); }
+}
+
+/* ---------- 打击感 ---------- */
+
+/* 分数飞字 */
+.score-float {
+  position: absolute;
+  z-index: 9;
+  font-family: "Trebuchet MS", var(--font);
+  font-size: clamp(22px, 2.4vw, 32px);
+  font-weight: 900;
+  color: #e03c0d;
+  -webkit-text-stroke: 4px #fff;
+  paint-order: stroke fill;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: scoreFloat 0.78s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+
+.score-float.is-big { color: #ff3f7a; font-size: clamp(28px, 3vw, 42px); }
+
+@keyframes scoreFloat {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.55); }
+  20% { opacity: 1; transform: translate(-50%, -78%) scale(1.16); }
+  55% { opacity: 1; transform: translate(-50%, -132%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -210%) scale(0.92); }
+}
+
+/* 连击等级：泡泡外圈随连击升级 */
+.bubble.is-hot {
+  border-color: #ffc23d;
+  box-shadow: 0 16px 30px rgba(255, 150, 40, 0.4), 0 0 0 5px rgba(255, 194, 61, 0.24);
+}
+
+.bubble.is-blaze::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  z-index: -1;
+  border-radius: inherit;
+  background: conic-gradient(#ff5f8a, #ffc23d, #5be0a0, #4bc8f0, #a97bff, #ff5f8a);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px));
+  animation: blazeSpin 2.4s linear infinite;
+}
+
+@keyframes blazeSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* 胶囊形泡泡用同心环，conic 环在非圆形上会变形 */
+.bubble--word.is-blaze::before { display: none; }
+
+.bubble--word.is-blaze {
+  box-shadow:
+    0 0 0 4px rgba(255, 95, 138, 0.95),
+    0 0 0 9px rgba(255, 194, 61, 0.82),
+    0 0 0 14px rgba(91, 224, 160, 0.52),
+    0 18px 30px rgba(10, 62, 82, 0.34);
+  animation: bubbleIn 0.35s cubic-bezier(0.2, 1.5, 0.5, 1) both, wordBlaze 1.5s ease-in-out 0.4s infinite;
+}
+
+@keyframes wordBlaze {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.1); }
+}
+
+/* 连击到 15 的屏幕边缘脉冲 */
+.combo-halo {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: none;
+  pointer-events: none;
+  background: radial-gradient(128% 110% at 50% 50%, rgba(255, 74, 110, 0) 46%, rgba(255, 74, 110, 0.34) 86%, rgba(255, 120, 50, 0.58) 100%);
+}
+
+.combo-halo.is-on {
+  display: block;
+  animation: haloPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes haloPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+/* 爆裂震屏 */
+.jolt { animation: jolt 0.17s ease; }
+
+@keyframes jolt {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  28% { transform: translate3d(2px, -3px, 0); }
+  58% { transform: translate3d(-3px, 2px, 0); }
+  82% { transform: translate3d(1px, -1px, 0); }
+}
+
+/* 涨潮整屏闪光 */
+.tide-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 108%, rgba(255, 66, 66, 0.78) 0%, rgba(255, 122, 66, 0.36) 44%, rgba(255, 60, 60, 0) 78%);
+}
+
+.tide-flash.is-on { animation: tideFlash 0.66s ease-out; }
+
+@keyframes tideFlash {
+  0% { opacity: 0; }
+  20% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ---------- 螃蟹 / 海岸线 ---------- */
+
+.tide-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 96px;
+  z-index: 2;
+  height: 0;
+  border-top: 3px dashed rgba(255, 255, 255, 0.42);
+  opacity: 0.7;
+  pointer-events: none;
+  transition: border-color 0.3s ease, opacity 0.3s ease;
+}
+
+.tide-line.is-danger {
+  border-color: rgba(255, 92, 92, 0.9);
+  opacity: 1;
+  animation: tideBlink 0.7s ease-in-out infinite;
+}
+
+@keyframes tideBlink {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+.layer.crabs { z-index: 3; }
+
+.crab {
+  position: absolute;
+  bottom: 86px;
+  width: clamp(52px, 5.4vw, 70px);
+  transform: translateX(-50%);
+  filter: drop-shadow(0 6px 8px rgba(20, 56, 74, 0.3));
+  animation: crabIn 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+.crab svg { display: block; width: 100%; height: auto; }
+
+.crab.is-scuttle { animation: crabScuttle 1.8s ease-in-out infinite; }
+
+@keyframes crabIn {
+  0% { opacity: 0; transform: translateX(-50%) translateY(34px) scale(0.35) rotate(-18deg); }
+  62% { opacity: 1; transform: translateX(-50%) translateY(-7px) scale(1.1) rotate(5deg); }
+  100% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1) rotate(0deg); }
+}
+
+@keyframes crabScuttle {
+  0%, 100% { transform: translateX(-50%) translateY(0) rotate(-2deg); }
+  50% { transform: translateX(-50%) translateY(-5px) rotate(2deg); }
+}
+
+.crab.is-rush {
+  animation: crabRush 0.5s cubic-bezier(0.6, 0, 1, 0.7) forwards;
+}
+
+@keyframes crabRush {
+  0% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-70px) scale(1.5) rotate(12deg); }
+}
+
+/* 警戒标记：第 5 只 */
+.crab.is-trigger svg { animation: crabAlarm 0.3s ease-in-out infinite; }
+
+@keyframes crabAlarm {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.5) saturate(1.4); }
+}
+
+/* ---------- 波次 ---------- */
+
+.wave-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 8;
+  padding: 12px 42px;
+  border-radius: 99px;
+  font-size: clamp(20px, 2.5vw, 32px);
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: #fff;
+  white-space: nowrap;
+  background: linear-gradient(180deg, rgba(58, 173, 184, 0.96), rgba(26, 122, 134, 0.96));
+  box-shadow: 0 14px 32px rgba(20, 56, 74, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -18px) scale(0.86);
+  transition: opacity 0.24s ease, transform 0.38s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.wave-banner.is-on { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.wave-banner.is-rest { background: linear-gradient(180deg, rgba(255, 176, 88, 0.96), rgba(232, 128, 48, 0.96)); }
+
+/* 海鸥 */
+.gull {
+  position: absolute;
+  z-index: 5;
+  width: clamp(46px, 5vw, 68px);
+  opacity: 0;
+  pointer-events: none;
+  animation: gullFly var(--dur, 4.2s) linear forwards;
+}
+
+.gull svg { display: block; width: 100%; height: auto; }
+
+@keyframes gullFly {
+  0% { opacity: 0; transform: translateX(-60px) translateY(0); }
+  8% { opacity: 0.95; }
+  50% { transform: translateX(50vw) translateY(-14px); }
+  92% { opacity: 0.95; }
+  100% { opacity: 0; transform: translateX(105vw) translateY(6px); }
+}
+
+.weak-line {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--sea);
+}
+
+.weak-line.hidden { display: none; }
+.weak-line b {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: #e6f1fb;
+  color: #0c447c;
+  font-family: "Trebuchet MS", var(--font);
 }
 
 /* ---------- 弹层 ---------- */

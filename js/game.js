@@ -54,7 +54,23 @@
   var ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
   var HOME_KEYS = 'asdfjkl';
   var LIVES = 5;
-  var POPS_PER_LEVEL = 8;
+
+  /* 波次节奏 */
+  var WAVE_SECONDS = 18;    // 一波持续多久
+  var BREAK_TIME = 4;       // 波与波之间的喘息（秒）
+  var MAX_WAVE_SPEED = 1.95; // 泡泡速度相对基础值的上限倍率
+
+  /* 螃蟹 */
+  var CRAB_LIMIT = 5;       // 攒够几只螃蟹就涨潮
+
+  /* 连击分级 */
+  var COMBO_HOT = 5;
+  var COMBO_BLAZE = 10;
+  var COMBO_HALO = 15;
+
+  /* 连击音阶（C 大调，跨两个八度） */
+  var SCALE = [523.25, 587.33, 659.25, 698.46, 783.99, 880, 987.77, 1046.5,
+    1174.66, 1318.51, 1396.91, 1567.98, 1760];
 
   var CHEERS = ['太棒了！', '好厉害！', '继续加油！', '完美！', '漂亮！', '就是这个键！'];
 
@@ -66,6 +82,11 @@
     field: $('field'),
     layerBubbles: $('layerBubbles'),
     layerFx: $('layerFx'),
+    layerCrabs: $('layerCrabs'),
+    layerSky: $('layerSky'),
+    waveBanner: $('waveBanner'),
+    tideFlash: $('tideFlash'),
+    tideLine: $('tideLine'),
     toast: $('toast'),
     score: $('score'),
     combo: $('combo'),
@@ -96,7 +117,8 @@
     endTitle: $('endTitle'),
     endEyebrow: $('endEyebrow'),
     newBest: $('newBest'),
-    bestLine: $('bestLine')
+    bestLine: $('bestLine'),
+    weakLine: $('weakLine')
   };
 
   /* ============================== 状态 ============================== */
@@ -113,8 +135,12 @@
     pops: 0,
     escaped: 0,
     lives: LIVES,
-    level: 1,
-    levelProgress: 0,
+    wave: 1,
+    wavePhase: 'spawning',   // spawning 进行中 / break 喘息
+    waveElapsed: 0,
+    wavePops: 0,
+    breakTimer: 0,
+    crabs: 0,
     elapsed: 0,
     spawnTimer: 0,
     lastTs: 0,
@@ -123,8 +149,7 @@
     nextChar: '',
     sound: true,
     fieldW: 0,
-    fieldH: 0,
-    busy: false
+    fieldH: 0
   };
 
   /* ============================== 音效 ============================== */
@@ -163,16 +188,26 @@
   }
 
   var SFX = {
-    pop: function (pitch) {
-      var base = 620 + (pitch || 0) * 40;
-      tone(base, 0.1, 'sine', 0.13, 0);
-      tone(base * 1.5, 0.12, 'sine', 0.08, 0.03);
+    pop: function (combo) {
+      var idx = clamp(Math.floor(((combo || 1) - 1) / 2), 0, SCALE.length - 1);
+      var f = SCALE[idx];
+      tone(f, 0.1, 'triangle', 0.12, 0);
+      tone(f * 1.5, 0.09, 'sine', 0.055, 0.015);
+      if ((combo || 0) >= COMBO_BLAZE) tone(f * 2, 0.07, 'square', 0.026, 0.03);
     },
     wrong: function () {
       tone(170, 0.14, 'square', 0.055, 0, 120);
     },
     escape: function () {
       tone(240, 0.24, 'sawtooth', 0.05, 0, 90);
+    },
+    crab: function () {
+      tone(330, 0.07, 'square', 0.035, 0, 190);
+    },
+    tide: function () {
+      tone(220, 0.24, 'sawtooth', 0.06, 0, 108);
+      tone(164.81, 0.3, 'square', 0.05, 0.08, 82);
+      tone(110, 0.4, 'triangle', 0.06, 0.18, 74);
     },
     level: function () {
       tone(523, 0.12, 'triangle', 0.1, 0);
@@ -211,6 +246,82 @@
   function measureField() {
     state.fieldW = dom.field.clientWidth;
     state.fieldH = dom.field.clientHeight;
+  }
+
+  /* ============================== 弱键记忆 ==============================
+     记录每个键敲错的次数，出题时给弱键加权。
+     打对时缓慢衰减，所以最近的表现占主导，练好了会自动退出弱键名单。
+     -------------------------------------------------------------------- */
+
+  var WEAK = {};
+  var WEAK_KEY = 'beach-typing-weak';
+
+  function loadWeak() {
+    WEAK = {};
+    try {
+      var obj = JSON.parse(readStore(WEAK_KEY, '{}'));
+      if (!obj || typeof obj !== 'object') return;
+      Object.keys(obj).forEach(function (k) {
+        var v = Number(obj[k]);
+        if (/^[a-z]$/.test(k) && isFinite(v) && v > 0) WEAK[k] = Math.min(6, v);
+      });
+    } catch (e) { WEAK = {}; }
+  }
+
+  function saveWeak() {
+    try { window.localStorage.setItem(WEAK_KEY, JSON.stringify(WEAK)); } catch (e) { /* ignore */ }
+  }
+
+  function markWeak(ch) {
+    WEAK[ch] = Math.min(6, (WEAK[ch] || 0) + 1);
+    saveWeak();
+  }
+
+  function easeWeak(ch) {
+    if (!WEAK[ch]) return;
+    WEAK[ch] = WEAK[ch] - 0.18;
+    if (WEAK[ch] <= 0.01) delete WEAK[ch];
+  }
+
+  function keyWeight(ch) {
+    var m = WEAK[ch] || 0;
+    if (m <= 0) return 1;
+    if (m < 2) return 1.5;
+    return 2;
+  }
+
+  function weightedPick(pool, weightOf) {
+    if (!pool.length) return null;
+    var total = 0;
+    var i;
+    for (i = 0; i < pool.length; i++) total += weightOf(pool[i]);
+    var r = Math.random() * total;
+    for (i = 0; i < pool.length; i++) {
+      r -= weightOf(pool[i]);
+      if (r <= 0) return pool[i];
+    }
+    return pool[pool.length - 1];
+  }
+
+  function wordWeight(w) {
+    var sum = 1;
+    for (var i = 0; i < w.length; i++) sum += (keyWeight(w[i]) - 1) * 0.6;
+    return sum;
+  }
+
+  function hasWeakChar(w) {
+    for (var i = 0; i < w.length; i++) {
+      if (keyWeight(w[i]) > 1) return true;
+    }
+    return false;
+  }
+
+  function topWeakKeys(n) {
+    return Object.keys(WEAK)
+      .map(function (k) { return { k: k, v: WEAK[k] }; })
+      .filter(function (o) { return o.v >= 0.5; })
+      .sort(function (a, b) { return b.v - a.v; })
+      .slice(0, n);
   }
 
   /* ============================== 虚拟键盘 ============================== */
@@ -266,12 +377,80 @@
     window.setTimeout(function () { el.classList.remove('bump'); }, 140);
   }
 
+  var lastBarPct = -1;
+
+  function updateWaveBar() {
+    var pct = state.wavePhase === 'break'
+      ? 100
+      : Math.round(clamp(state.waveElapsed / WAVE_SECONDS, 0, 1) * 200) / 2;
+    if (pct === lastBarPct) return;
+    lastBarPct = pct;
+    dom.levelFill.style.width = pct + '%';
+  }
+
   function updateHud() {
     dom.score.textContent = state.score;
     dom.combo.textContent = '×' + state.combo;
-    dom.levelText.textContent = '第 ' + state.level + ' 关';
-    dom.levelCount.textContent = state.levelProgress + ' / ' + POPS_PER_LEVEL;
-    dom.levelFill.style.width = (state.levelProgress / POPS_PER_LEVEL * 100) + '%';
+    dom.levelText.textContent = state.wavePhase === 'break' ? '休息中' : '第 ' + state.wave + ' 波';
+    dom.levelCount.textContent = state.wavePops + ' 个';
+    updateWaveBar();
+  }
+
+  /* ============================== 打击反馈 ============================== */
+
+  function floatScore(x, y, text, big) {
+    var el = document.createElement('b');
+    el.className = 'score-float' + (big ? ' is-big' : '');
+    el.textContent = text;
+    el.style.left = (x + rand(-16, 16)).toFixed(0) + 'px';
+    el.style.top = (y + rand(-10, 10)).toFixed(0) + 'px';
+    dom.layerFx.appendChild(el);
+    window.setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 840);
+  }
+
+  function jolt() {
+    dom.field.classList.remove('jolt');
+    void dom.field.offsetWidth;
+    dom.field.classList.add('jolt');
+  }
+
+  var haloEl = null;
+
+  function comboHalo() {
+    if (!haloEl) {
+      haloEl = document.createElement('div');
+      haloEl.className = 'combo-halo';
+      dom.field.appendChild(haloEl);
+    }
+    return haloEl;
+  }
+
+  function refreshComboSkin() {
+    var tier = comboLevel();
+    state.bubbles.forEach(applyComboSkin);
+    comboHalo().classList.toggle('is-on', tier >= 3);
+  }
+
+  function comboLevel() {
+    if (state.combo >= COMBO_HALO) return 3;
+    if (state.combo >= COMBO_BLAZE) return 2;
+    if (state.combo >= COMBO_HOT) return 1;
+    return 0;
+  }
+
+  function applyComboSkin(b) {
+    var tier = comboLevel();
+    b.el.classList.toggle('is-hot', tier >= 1);
+    b.el.classList.toggle('is-blaze', tier >= 2);
+  }
+
+  function clearComboSkin() {
+    state.bubbles.forEach(function (b) {
+      b.el.classList.remove('is-hot', 'is-blaze');
+    });
+    comboHalo().classList.remove('is-on');
   }
 
   function showToast(text, type) {
@@ -303,13 +482,20 @@
 
   function nextSpawnDelay() {
     var cfg = MODES[state.mode];
-    var base = Math.max(760, cfg.spawn - (state.level - 1) * 105);
-    return base * rand(0.85, 1.15);
+    var base = Math.max(760, cfg.spawn - (state.wave - 1) * 105);
+    var d = base * rand(0.85, 1.15);
+    // 场上泡泡太少就加快补充，让打得快的人不至于干等
+    if (state.bubbles.length < 2) d *= 0.35;
+    else if (state.bubbles.length < 3) d *= 0.6;
+    // 连击越高，泡泡来得越密，正反馈
+    if (state.combo >= COMBO_BLAZE) d *= 0.62;
+    else if (state.combo >= COMBO_HOT) d *= 0.8;
+    return d;
   }
 
   function spawnBubble(offsetY) {
     var cfg = MODES[state.mode];
-    if (state.bubbles.length >= cfg.maxOnScreen + Math.floor((state.level - 1) / 3)) return;
+    if (state.bubbles.length >= cfg.maxOnScreen + Math.floor((state.wave - 1) / 3)) return false;
 
     var isWord = !!cfg.words;
     var text = '';
@@ -317,14 +503,19 @@
     if (isWord) {
       var usedW = activeWords();
       var pool = cfg.words.filter(function (w) { return !usedW[w]; });
-      if (!pool.length) return;
-      text = pick(pool);
+      if (!pool.length) return false;
+      var weakW = pool.filter(hasWeakChar);
+      var anyWeakWord = cfg.words.some(function (w) { return usedW[w] && hasWeakChar(w); });
+      text = (weakW.length && !anyWeakWord) ? pick(weakW) : weightedPick(pool, wordWeight);
     } else {
       var usedL = activeLetters();
       var poolL = cfg.letters.filter(function (c) { return !usedL[c]; });
-      if (!poolL.length) return;
-      text = pick(poolL);
+      if (!poolL.length) return false;
+      var weakL = poolL.filter(function (c) { return keyWeight(c) > 1; });
+      var anyWeak = cfg.letters.some(function (c) { return usedL[c] && keyWeight(c) > 1; });
+      text = (weakL.length && !anyWeak) ? pick(weakL) : weightedPick(poolL, keyWeight);
     }
+    if (!text) return false;
 
     var el = document.createElement('div');
     el.className = 'bubble ' + (isWord ? 'bubble--word' : 'bubble--letter');
@@ -368,25 +559,39 @@
     var pad = w / 2 + 14;
     var slice = Math.max(1, state.fieldW - pad * 2);
 
+    var speedBase = Math.min(cfg.speed * MAX_WAVE_SPEED, cfg.speed + (state.wave - 1) * 6.5);
+    var startY = state.fieldH - h * 0.5 - (offsetY || 0) + rand(0, 10);
+
+    var startX = rand(pad, pad + slice);
+    for (var g = 0; g < 12; g++) {
+      var clash = state.bubbles.some(function (o) {
+        return Math.abs(o.x - startX) < (o.w + w) * 0.46 && Math.abs(o.y - startY) < 130;
+      });
+      if (!clash) break;
+      startX = rand(pad, pad + slice);
+    }
+
     var bubble = {
       el: el,
       charsEl: charsEl,
       word: isWord ? text : null,
       char: isWord ? text[0] : text,
       typed: 0,
-      x: rand(pad, pad + slice),
+      x: startX,
       baseX: 0,
-      y: state.fieldH + h / 2 + (offsetY || 0) + rand(6, 30),
+      y: startY,
       w: w,
       h: h,
       phase: rand(0, Math.PI * 2),
-      speed: (cfg.speed + (state.level - 1) * 6.5) * rand(0.9, 1.12) * (isWord ? 0.92 : 1)
+      speed: speedBase * rand(0.9, 1.12) * (isWord ? 0.92 : 1)
     };
     bubble.baseX = bubble.x;
 
     state.bubbles.push(bubble);
     positionBubble(bubble, 0);
     if (isWord) markWordChars(bubble);
+    applyComboSkin(bubble);
+    return true;
   }
 
   function positionBubble(b, t) {
@@ -437,12 +642,6 @@
     window.setTimeout(function () { b.el.remove(); }, 330);
   }
 
-  function removeBubble(b) {
-    var idx = state.bubbles.indexOf(b);
-    if (idx > -1) state.bubbles.splice(idx, 1);
-    b.el.remove();
-  }
-
   /* ============================== 输入处理 ============================== */
 
   function urgentBubble() {
@@ -475,7 +674,7 @@
 
     if (!ch) {
       dom.nextKey.textContent = '—';
-      dom.fingerTip.textContent = '等泡泡飘上来';
+      dom.fingerTip.textContent = state.wavePhase === 'break' ? '休息一下，马上开始' : '等泡泡飘上来';
       return;
     }
 
@@ -516,6 +715,7 @@
     state.hits += 1;
     state.combo += 1;
     if (state.combo > state.maxCombo) state.maxCombo = state.combo;
+    easeWeak(key);
 
     var mult = 1 + Math.min(4, Math.floor(state.combo / 5)) * 0.5;
     var base;
@@ -528,10 +728,12 @@
         buble.el.classList.remove('is-hit');
         void buble.el.offsetWidth;
         buble.el.classList.add('is-hit');
-        state.score += Math.round(base * mult * 0.4);
-        SFX.pop(buble.typed);
+        var part = Math.round(base * mult * 0.4);
+        state.score += part;
+        SFX.pop(state.combo);
         flashKey(key);
         bump(dom.score);
+        floatScore(buble.x, buble.y, '+' + part, false);
         updateHud();
         refreshHint();
         return;
@@ -541,27 +743,24 @@
       base = 10;
     }
 
-    state.score += Math.round(base * mult);
+    var gain = Math.round(base * mult);
+    state.score += gain;
     state.pops += 1;
-    state.levelProgress += 1;
+    state.wavePops += 1;
 
     flashKey(key);
-    SFX.pop(Math.min(state.combo, 8));
+    SFX.pop(state.combo);
     bump(dom.score);
     bump(dom.combo);
     popBubble(buble, hand);
+    floatScore(buble.x, buble.y, '+' + gain, state.combo >= COMBO_BLAZE);
+    jolt();
+    refreshComboSkin();
 
     if (state.combo % 10 === 0) {
       showToast(state.combo + ' 连击！' + pick(CHEERS), 'good');
     } else if (state.combo > 0 && state.combo % 5 === 0) {
       showToast(pick(CHEERS) + ' ×' + mult.toFixed(1), 'good');
-    }
-
-    if (state.levelProgress >= POPS_PER_LEVEL) {
-      state.levelProgress = 0;
-      state.level += 1;
-      SFX.level();
-      showToast('进入第 ' + state.level + ' 关！泡泡变快了', 'good');
     }
 
     updateHud();
@@ -571,18 +770,163 @@
   function registerMiss(key) {
     state.misses += 1;
     state.combo = 0;
+    markWeak(key);
     SFX.wrong();
     flashKey(key, 'is-wrong');
     dom.field.classList.remove('shake');
     void dom.field.offsetWidth;
     dom.field.classList.add('shake');
+    clearComboSkin();
     updateHud();
+  }
+
+  /* ============================== 螃蟹与涨潮 ============================== */
+
+  var CRAB_SVG =
+    '<svg viewBox="0 0 64 48" aria-hidden="true">' +
+      '<g stroke="#bf4a26" stroke-width="3.6" stroke-linecap="round" fill="none">' +
+        '<path d="M19 31 L11 40"/><path d="M21 35 L15 43"/>' +
+        '<path d="M45 31 L53 40"/><path d="M43 35 L49 43"/>' +
+      '</g>' +
+      '<path d="M16 24 q-9 -7 -11 1 q-2 7 7 7 q5 0 5 -5 z" fill="#e86a3d"/>' +
+      '<path d="M48 24 q9 -7 11 1 q2 7 -7 7 q-5 0 -5 -5 z" fill="#e86a3d"/>' +
+      '<ellipse cx="32" cy="28" rx="17" ry="12" fill="#e86a3d"/>' +
+      '<ellipse cx="32" cy="25" rx="16.5" ry="10.5" fill="#ff8f5f"/>' +
+      '<circle cx="26" cy="21" r="5" fill="#fff"/>' +
+      '<circle cx="38" cy="21" r="5" fill="#fff"/>' +
+      '<circle cx="26.6" cy="21.6" r="2.4" fill="#2b1a12"/>' +
+      '<circle cx="38.6" cy="21.6" r="2.4" fill="#2b1a12"/>' +
+      '<path d="M27 31 q5 4 10 0" stroke="#a83a17" stroke-width="2.2" fill="none" stroke-linecap="round"/>' +
+    '</svg>';
+
+  function updateTideLine() {
+    dom.tideLine.classList.toggle('is-danger', state.crabs >= CRAB_LIMIT - 2);
+  }
+
+  function addCrab(x) {
+    var el = document.createElement('div');
+    el.className = 'crab';
+    if (state.crabs >= CRAB_LIMIT - 1) el.classList.add('is-trigger');
+    el.innerHTML = CRAB_SVG;
+    var half = 28;
+    el.style.left = clamp(x, half + 6, Math.max(half + 6, state.fieldW - half - 6)) + 'px';
+    dom.layerCrabs.appendChild(el);
+    state.crabs += 1;
+    return el;
+  }
+
+  /* 漏掉的泡泡落到沙滩上变成螃蟹 */
+  function landBubble(b) {
+    var idx = state.bubbles.indexOf(b);
+    if (idx > -1) state.bubbles.splice(idx, 1);
+    b.el.classList.add('is-pop');
+    window.setTimeout(function () { b.el.remove(); }, 330);
+
+    state.escaped += 1;
+    state.combo = 0;
+    clearComboSkin();
+    updateHud();
+
+    addCrab(b.x);
+    SFX.crab();
+    updateTideLine();
+
+    if (state.crabs >= CRAB_LIMIT) {
+      window.setTimeout(tideRush, 240);
+    } else if (state.crabs === 1 || state.crabs >= CRAB_LIMIT - 1) {
+      showToast('泡泡破了，螃蟹上岸！（' + state.crabs + '/' + CRAB_LIMIT + '）', 'bad');
+    }
+  }
+
+  /* 螃蟹攒够了，涨潮冲上岸 */
+  function tideRush() {
+    if (!state.running) return;
+    SFX.tide();
+
+    dom.tideFlash.classList.remove('is-on');
+    void dom.tideFlash.offsetWidth;
+    dom.tideFlash.classList.add('is-on');
+
+    Array.prototype.forEach.call(dom.layerCrabs.children, function (c) {
+      c.classList.add('is-rush');
+    });
+    window.setTimeout(function () { dom.layerCrabs.innerHTML = ''; }, 600);
+
+    state.crabs = 0;
+    state.combo = 0;
+    clearComboSkin();
+    updateTideLine();
+    showToast('涨潮了！螃蟹冲上岸', 'bad');
+    loseLife();
+  }
+
+  /* ============================== 波次 ============================== */
+
+  var bannerTimer = 0;
+
+  function showWaveBanner(text) {
+    dom.waveBanner.textContent = text;
+    dom.waveBanner.classList.add('is-on');
+    window.clearTimeout(bannerTimer);
+    bannerTimer = window.setTimeout(function () {
+      dom.waveBanner.classList.remove('is-on');
+    }, 2200);
+  }
+
+  var GULL_SVG =
+    '<svg viewBox="0 0 80 34" aria-hidden="true">' +
+      '<path d="M4 25 Q18 4 32 21 Q46 4 60 25" fill="none" stroke="#4a7f8e" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M4 25 Q18 4 32 21 Q46 4 60 25" fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
+
+  function spawnGull() {
+    var el = document.createElement('div');
+    el.className = 'gull';
+    el.innerHTML = GULL_SVG;
+    el.style.top = rand(Math.round(state.fieldH * 0.34), Math.max(200, Math.round(state.fieldH * 0.62))).toFixed(0) + 'px';
+    el.style.left = '-70px';
+    el.style.setProperty('--dur', rand(3.8, 5.4).toFixed(2) + 's');
+    dom.layerSky.appendChild(el);
+    window.setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, 6000);
+  }
+
+  function beginWave(n, prefill) {
+    state.wave = n;
+    state.wavePhase = 'spawning';
+    state.waveElapsed = 0;
+    state.wavePops = 0;
+    state.spawnTimer = 520;
+    lastBarPct = -1;
+
+    showWaveBanner('第 ' + n + ' 波');
+    SFX.level();
+    updateHud();
+
+    if (prefill) {
+      for (var i = 0; i < prefill; i++) spawnBubble(i * 100);
+    }
+  }
+
+  function endWave() {
+    state.wavePhase = 'break';
+    state.breakTimer = BREAK_TIME;
+    updateHud();
+    showWaveBanner('喘口气');
+    spawnGull();
+    if (state.crabs > 0) {
+      showToast('沙滩上还有 ' + state.crabs + ' 只螃蟹', 'bad');
+    } else {
+      showToast('清得干干净净！', 'good');
+    }
   }
 
   function loseLife() {
     if (!state.running) return;
     state.lives -= 1;
     state.combo = 0;
+    clearComboSkin();
     renderHearts();
     var hearts = dom.hearts.querySelectorAll('.heart');
     var node = hearts[state.lives];
@@ -609,28 +953,30 @@
     if (!state.running || state.paused) return;
 
     state.elapsed += dt;
-    state.spawnTimer -= dt * 1000;
 
-    if (state.spawnTimer <= 0) {
-      spawnBubble();
-      state.spawnTimer = nextSpawnDelay();
+    if (state.wavePhase === 'break') {
+      state.breakTimer -= dt;
+      if (state.breakTimer <= 0) beginWave(state.wave + 1);
+    } else {
+      state.waveElapsed += dt;
+      state.spawnTimer -= dt * 1000;
+      if (state.spawnTimer <= 0) {
+        spawnBubble();
+        state.spawnTimer = nextSpawnDelay();
+      }
+      if (state.waveElapsed >= WAVE_SECONDS) endWave();
     }
+    updateWaveBar();
 
     for (var i = state.bubbles.length - 1; i >= 0; i--) {
       var b = state.bubbles[i];
       b.y -= b.speed * dt;
       positionBubble(b, state.elapsed);
 
-      if (b.y - b.h / 2 < 120) b.el.classList.add('is-warn');
+      if (b.y - b.h / 2 < 132) b.el.classList.add('is-warn');
       else b.el.classList.remove('is-warn');
 
-      if (b.y + b.h / 2 < -6) {
-        removeBubble(b);
-        state.escaped += 1;
-        SFX.escape();
-        showToast('泡泡跑掉了…', 'bad');
-        loseLife();
-      }
+      if (b.y + b.h / 2 < -6) landBubble(b);
     }
 
     refreshHint();
@@ -647,16 +993,27 @@
     state.pops = 0;
     state.escaped = 0;
     state.lives = LIVES;
-    state.level = 1;
-    state.levelProgress = 0;
+    state.wave = 1;
+    state.wavePhase = 'spawning';
+    state.waveElapsed = 0;
+    state.wavePops = 0;
+    state.breakTimer = 0;
+    state.crabs = 0;
     state.elapsed = 0;
-    state.spawnTimer = 900;
+    state.spawnTimer = 520;
     state.lastTs = 0;
     state.nextChar = '';
+    lastBarPct = -1;
     state.bubbles.forEach(function (b) { b.el.remove(); });
     state.bubbles = [];
     dom.layerFx.innerHTML = '';
+    dom.layerCrabs.innerHTML = '';
+    dom.layerSky.innerHTML = '';
+    dom.waveBanner.classList.remove('is-on');
+    dom.tideFlash.classList.remove('is-on');
     dom.toast.className = 'toast';
+    comboHalo().classList.remove('is-on');
+    updateTideLine();
     renderHearts();
     updateHud();
     refreshHint();
@@ -674,9 +1031,7 @@
     ensureAudio();
     SFX.start();
     showToast('准备好了吗？开始！', 'good');
-    spawnBubble(0);
-    spawnBubble(120);
-    spawnBubble(250);
+    beginWave(1, 3);
     if (!state.raf) state.raf = window.requestAnimationFrame(tick);
   }
 
@@ -700,6 +1055,12 @@
     SFX.over();
     state.bubbles.forEach(function (b) { b.el.remove(); });
     state.bubbles = [];
+    dom.layerCrabs.innerHTML = '';
+    dom.layerSky.innerHTML = '';
+    dom.waveBanner.classList.remove('is-on');
+    state.crabs = 0;
+    clearComboSkin();
+    updateTideLine();
 
     var total = state.hits + state.misses;
     var accuracy = total ? Math.round((state.hits / total) * 100) : 100;
@@ -711,6 +1072,10 @@
     dom.endAccuracy.textContent = total ? accuracy + '%' : '—';
     dom.endCpm.textContent = cpm;
     dom.endPops.textContent = state.pops;
+
+    dom.levelText.textContent = '本轮结束';
+    dom.levelCount.textContent = '共 ' + state.pops + ' 个';
+    dom.levelFill.style.width = '100%';
 
     var storeKey = 'beach-typing-best-' + state.mode;
     var best = parseInt(readStore(storeKey, '0'), 10) || 0;
@@ -734,6 +1099,17 @@
       dom.endEyebrow.textContent = '慢慢来，手指会记住的';
     }
 
+    var weak = topWeakKeys(3);
+    if (weak.length) {
+      var html = '最需要练的键：';
+      weak.forEach(function (o) { html += '<b>' + o.k.toUpperCase() + '</b>'; });
+      dom.weakLine.innerHTML = html;
+      dom.weakLine.classList.remove('hidden');
+    } else {
+      dom.weakLine.classList.add('hidden');
+    }
+    saveWeak();
+
     show(dom.endScreen);
     refreshHint();
   }
@@ -741,6 +1117,7 @@
   function backToStart() {
     state.running = false;
     state.paused = false;
+    saveWeak();
     resetState();
     hide(dom.endScreen);
     hide(dom.pauseScreen);
@@ -829,6 +1206,7 @@
     buildKeyboard();
     bindEvents();
     measureField();
+    loadWeak();
     renderHearts();
     updateHud();
     refreshHint();

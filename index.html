@@ -25,7 +25,7 @@
 
     <div class="hud-group hud-level">
       <div class="level-line">
-        <span id="levelText">第 1 关</span>
+        <span id="levelText">第 1 波</span>
         <span id="levelCount" class="level-count">0 / 8</span>
       </div>
       <div class="level-bar"><i id="levelFill"></i></div>
@@ -43,8 +43,13 @@
   </header>
 
   <main id="field">
+    <div class="tide-line" id="tideLine" aria-hidden="true"></div>
+    <div class="layer crabs" id="layerCrabs"></div>
     <div class="layer" id="layerBubbles"></div>
     <div class="layer fx" id="layerFx"></div>
+    <div class="layer fx" id="layerSky"></div>
+    <div class="wave-banner" id="waveBanner"></div>
+    <div class="tide-flash" id="tideFlash"></div>
     <div class="toast" id="toast"></div>
 
     <section class="overlay" id="screenStart">
@@ -110,6 +115,7 @@
         </div>
 
         <p class="best-line" id="bestLine">最好成绩：0 分</p>
+        <p class="weak-line hidden" id="weakLine"></p>
 
         <div class="btn-row">
           <button class="btn btn-primary" id="againBtn" type="button">再来一局</button>
