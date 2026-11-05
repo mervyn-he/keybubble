@@ -74,6 +74,14 @@
 
   var CHEERS = ['太棒了！', '好厉害！', '继续加油！', '完美！', '漂亮！', '就是这个键！'];
 
+  /* 物理键映射：用 e.code 而不是 e.key。
+     中文输入法组词时 e.key 会变成 "Process"，e.code 仍然是 KeyA 这样的物理键名。 */
+  var CODE_TO_KEY = {};
+  'abcdefghijklmnopqrstuvwxyz'.split('').forEach(function (c) {
+    CODE_TO_KEY['Key' + c.toUpperCase()] = c;
+  });
+
+
   /* ============================== DOM ============================== */
 
   var $ = function (id) { return document.getElementById(id); };
@@ -248,6 +256,30 @@
     state.fieldH = dom.field.clientHeight;
   }
 
+  /* --------------------------------------------------------------
+     可取消的定时器。
+     开局、重开、回首页时必须清掉，否则上一局排队的回调会在新局里执行
+     （典型症状：重开后秒涨潮扣血）。
+     -------------------------------------------------------------- */
+
+  var gameTimers = {};
+
+  function later(fn, ms) {
+    var id = window.setTimeout(function () {
+      delete gameTimers[id];
+      fn();
+    }, ms);
+    gameTimers[id] = true;
+    return id;
+  }
+
+  function clearGameTimers() {
+    Object.keys(gameTimers).forEach(function (id) {
+      window.clearTimeout(id);
+    });
+    gameTimers = {};
+  }
+
   /* ============================== 弱键记忆 ==============================
      记录每个键敲错的次数，出题时给弱键加权。
      打对时缓慢衰减，所以最近的表现占主导，练好了会自动退出弱键名单。
@@ -268,19 +300,39 @@
     } catch (e) { WEAK = {}; }
   }
 
+  var weakSaveTimer = 0;
+
   function saveWeak() {
     try { window.localStorage.setItem(WEAK_KEY, JSON.stringify(WEAK)); } catch (e) { /* ignore */ }
   }
 
+  /* 连续敲错时不逐键同步写盘，合并成一次；局末再强制落盘 */
+  function scheduleWeakSave() {
+    if (weakSaveTimer) return;
+    weakSaveTimer = window.setTimeout(function () {
+      weakSaveTimer = 0;
+      saveWeak();
+    }, 1500);
+  }
+
+  function flushWeakSave() {
+    if (weakSaveTimer) {
+      window.clearTimeout(weakSaveTimer);
+      weakSaveTimer = 0;
+    }
+    saveWeak();
+  }
+
   function markWeak(ch) {
     WEAK[ch] = Math.min(6, (WEAK[ch] || 0) + 1);
-    saveWeak();
+    scheduleWeakSave();
   }
 
   function easeWeak(ch) {
     if (!WEAK[ch]) return;
     WEAK[ch] = WEAK[ch] - 0.18;
     if (WEAK[ch] <= 0.01) delete WEAK[ch];
+    scheduleWeakSave();
   }
 
   function keyWeight(ch) {
@@ -550,6 +602,8 @@
       el.appendChild(c);
     }
 
+    // 先按住入场动画：此时还没有 --pos，动画会在原点播放，泡泡会从左上角飞过来
+    el.style.animation = 'none';
     dom.layerBubbles.appendChild(el);
 
     var w = el.offsetWidth;
@@ -589,6 +643,8 @@
 
     state.bubbles.push(bubble);
     positionBubble(bubble, 0);
+    void el.offsetWidth;
+    el.style.animation = '';
     if (isWord) markWordChars(bubble);
     applyComboSkin(bubble);
     return true;
@@ -694,11 +750,15 @@
     for (var i = 0; i < state.bubbles.length; i++) {
       var b = state.bubbles[i];
       var need = b.word ? b.word[b.typed] : b.char;
-      if (need === k) {
-        if (!target) target = b;
-        else if (b.typed > 0 && target.typed === 0) target = b;
-        else if (target.typed === 0 && b.typed === 0 && b.y < target.y) target = b;
-      }
+      if (need !== k) continue;
+
+      if (!target) { target = b; continue; }
+
+      // 已经开始打词的优先，同为进行中的看谁更靠上（更快掉出去）
+      var bStarted = b.typed > 0 ? 1 : 0;
+      var tStarted = target.typed > 0 ? 1 : 0;
+      if (bStarted > tStarted) target = b;
+      else if (bStarted === tStarted && b.y < target.y) target = b;
     }
 
     if (!target) {
@@ -805,7 +865,7 @@
 
   function addCrab(x) {
     var el = document.createElement('div');
-    el.className = 'crab';
+    el.className = 'crab is-scuttle';
     if (state.crabs >= CRAB_LIMIT - 1) el.classList.add('is-trigger');
     el.innerHTML = CRAB_SVG;
     var half = 28;
@@ -832,15 +892,19 @@
     updateTideLine();
 
     if (state.crabs >= CRAB_LIMIT) {
-      window.setTimeout(tideRush, 240);
+      later(tideRush, 240);
     } else if (state.crabs === 1 || state.crabs >= CRAB_LIMIT - 1) {
       showToast('泡泡破了，螃蟹上岸！（' + state.crabs + '/' + CRAB_LIMIT + '）', 'bad');
     }
   }
 
-  /* 螃蟹攒够了，涨潮冲上岸 */
+  /* 螃蟹攒够了，涨潮冲上岸。暂停时挂起，恢复后再执行，不会在暂停画面背后扣血 */
   function tideRush() {
     if (!state.running) return;
+    if (state.paused) {
+      later(tideRush, 400);
+      return;
+    }
     SFX.tide();
 
     dom.tideFlash.classList.remove('is-on');
@@ -864,8 +928,9 @@
 
   var bannerTimer = 0;
 
-  function showWaveBanner(text) {
+  function showWaveBanner(text, isRest) {
     dom.waveBanner.textContent = text;
+    dom.waveBanner.classList.toggle('is-rest', !!isRest);
     dom.waveBanner.classList.add('is-on');
     window.clearTimeout(bannerTimer);
     bannerTimer = window.setTimeout(function () {
@@ -905,7 +970,11 @@
     updateHud();
 
     if (prefill) {
-      for (var i = 0; i < prefill; i++) spawnBubble(i * 100);
+      // 按游戏区高度算能塞下几个：既要错开，又不能一开局就压到警戒线
+      var step = clamp(state.fieldH * 0.2, 56, 108);
+      var fit = Math.max(1, Math.floor((state.fieldH - 242) / step) + 1);
+      var count = Math.min(prefill, fit);
+      for (var i = 0; i < count; i++) spawnBubble(i * step);
     }
   }
 
@@ -913,7 +982,7 @@
     state.wavePhase = 'break';
     state.breakTimer = BREAK_TIME;
     updateHud();
-    showWaveBanner('喘口气');
+    showWaveBanner('喘口气', true);
     spawnGull();
     if (state.crabs > 0) {
       showToast('沙滩上还有 ' + state.crabs + ' 只螃蟹', 'bad');
@@ -968,23 +1037,34 @@
     }
     updateWaveBar();
 
-    for (var i = state.bubbles.length - 1; i >= 0; i--) {
-      var b = state.bubbles[i];
-      b.y -= b.speed * dt;
-      positionBubble(b, state.elapsed);
+    // 休息期泡泡原地停住：说好喘口气就不该还在扣血
+    if (state.wavePhase !== 'break') {
+      for (var i = state.bubbles.length - 1; i >= 0; i--) {
+        var b = state.bubbles[i];
+        b.y -= b.speed * dt;
+        positionBubble(b, state.elapsed);
 
-      if (b.y - b.h / 2 < 132) b.el.classList.add('is-warn');
-      else b.el.classList.remove('is-warn');
+        if (b.y - b.h / 2 < 132) b.el.classList.add('is-warn');
+        else b.el.classList.remove('is-warn');
 
-      if (b.y + b.h / 2 < -6) landBubble(b);
+        if (b.y + b.h / 2 < -6) landBubble(b);
+      }
     }
 
     refreshHint();
   }
 
+  function stopLoop() {
+    if (state.raf) {
+      window.cancelAnimationFrame(state.raf);
+      state.raf = 0;
+    }
+  }
+
   /* ============================== 游戏流程 ============================== */
 
   function resetState() {
+    clearGameTimers();
     state.score = 0;
     state.combo = 0;
     state.maxCombo = 0;
@@ -1009,7 +1089,7 @@
     dom.layerFx.innerHTML = '';
     dom.layerCrabs.innerHTML = '';
     dom.layerSky.innerHTML = '';
-    dom.waveBanner.classList.remove('is-on');
+    dom.waveBanner.classList.remove('is-on', 'is-rest');
     dom.tideFlash.classList.remove('is-on');
     dom.toast.className = 'toast';
     comboHalo().classList.remove('is-on');
@@ -1052,6 +1132,8 @@
   function endGame() {
     state.running = false;
     state.paused = false;
+    stopLoop();
+    clearGameTimers();
     SFX.over();
     state.bubbles.forEach(function (b) { b.el.remove(); });
     state.bubbles = [];
@@ -1108,7 +1190,7 @@
     } else {
       dom.weakLine.classList.add('hidden');
     }
-    saveWeak();
+    flushWeakSave();
 
     show(dom.endScreen);
     refreshHint();
@@ -1117,7 +1199,8 @@
   function backToStart() {
     state.running = false;
     state.paused = false;
-    saveWeak();
+    stopLoop();
+    flushWeakSave();
     resetState();
     hide(dom.endScreen);
     hide(dom.pauseScreen);
@@ -1131,6 +1214,8 @@
 
   function bindEvents() {
     dom.startBtn.addEventListener('click', function () {
+      // 按钮被 Enter 激活时会和 window 的 keydown 抢着开一局，用界面状态兜住
+      if (dom.startScreen.classList.contains('hidden')) return;
       ensureAudio();
       startGame();
     });
@@ -1143,6 +1228,7 @@
       });
       card.classList.add('is-active');
       state.mode = card.dataset.mode;
+      writeStore('beach-typing-mode', state.mode);
       var storeKey = 'beach-typing-best-' + state.mode;
       var best = parseInt(readStore(storeKey, '0'), 10) || 0;
       dom.bestLine.textContent = '最好成绩：' + best + ' 分';
@@ -1150,11 +1236,15 @@
 
     dom.resumeBtn.addEventListener('click', function () { togglePause(false); });
     dom.restartBtn.addEventListener('click', function () {
+      if (dom.pauseScreen.classList.contains('hidden')) return;
       hide(dom.pauseScreen);
       startGame();
     });
     dom.homeBtn.addEventListener('click', backToStart);
-    dom.againBtn.addEventListener('click', startGame);
+    dom.againBtn.addEventListener('click', function () {
+      if (dom.endScreen.classList.contains('hidden')) return;
+      startGame();
+    });
     dom.backBtn.addEventListener('click', backToStart);
     dom.pauseBtn.addEventListener('click', function () { togglePause(); });
 
@@ -1171,6 +1261,8 @@
         return;
       }
       if (e.key === 'Enter' && !state.running) {
+        // 焦点在按钮上时 Enter 会同时触发默认点击，必须挡掉，否则开两局
+        e.preventDefault();
         if (!dom.startScreen.classList.contains('hidden')) startGame();
         else if (!dom.endScreen.classList.contains('hidden')) startGame();
         return;
@@ -1178,10 +1270,14 @@
       if (e.key === ' ' || e.key === 'Spacebar') e.preventDefault();
       if (e.repeat) return;
 
-      var k = e.key;
-      if (!k || k.length !== 1) return;
-      k = k.toLowerCase();
-      if (!/^[a-z]$/.test(k)) return;
+      // 优先用物理键名：中文输入法组词时 e.key 会变成 "Process"
+      var k = CODE_TO_KEY[e.code];
+      if (!k) {
+        var raw = e.key;
+        if (!raw || raw.length !== 1) return;
+        k = raw.toLowerCase();
+        if (!/^[a-z]$/.test(k)) return;
+      }
 
       if (!state.running) return;
       if (state.paused) { togglePause(false); return; }
@@ -1214,7 +1310,16 @@
     state.sound = readStore('beach-typing-sound', '1') !== '0';
     dom.soundBtn.classList.toggle('is-muted', !state.sound);
 
-    var best = parseInt(readStore('beach-typing-best-home', '0'), 10) || 0;
+    // 恢复上次选中的模式
+    var savedMode = readStore('beach-typing-mode', 'home');
+    if (MODES[savedMode]) {
+      state.mode = savedMode;
+      Array.prototype.forEach.call(dom.modeList.children, function (c) {
+        c.classList.toggle('is-active', c.dataset.mode === savedMode);
+      });
+    }
+
+    var best = parseInt(readStore('beach-typing-best-' + state.mode, '0'), 10) || 0;
     dom.bestLine.textContent = '最好成绩：' + best + ' 分';
 
     window.setTimeout(measureField, 60);
